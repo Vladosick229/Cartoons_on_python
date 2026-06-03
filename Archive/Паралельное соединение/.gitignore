@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# macOS
+__MACOSX/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific (ваши папки с venv)
+Мультик последовательное соединение 2/venv/
+Мультик последовательное соединение 2/__pycache__/
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Temporary files
+*.tmp
+*.temp

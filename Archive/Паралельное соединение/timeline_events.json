@@ -1,0 +1,34 @@
+[
+  {"time": 0.0, "action": "subtitle", "text": "Рассмотрим параллельное соединение двух резисторов"},
+  {"time": 0.0, "action": "show_resistor", "id": "R1", "value": "100 Ом"},
+  {"time": 1.0, "action": "subtitle", "text": "R₁ = 100 Ом, R₂ = 0…200 Ом"},
+  {"time": 1.0, "action": "show_resistor", "id": "R2", "value": "0…200 Ом"},
+
+  {"time": 2.0, "action": "subtitle", "text": "Добавляем измерительные приборы в цепь"},
+  {"time": 2.0, "action": "show_meter", "id": "PA1"},
+  {"time": 2.3, "action": "show_meter", "id": "PA2"},
+  {"time": 2.6, "action": "show_meter", "id": "PA3"},
+  {"time": 2.9, "action": "show_meter", "id": "PV1"},
+
+  {"time": 4.0, "action": "subtitle", "text": "Подключаем источник постоянного напряжения E₁ = 12 В"},
+  {"time": 4.0, "action": "show_source", "id": "E1"},
+
+  {"time": 6.0, "action": "subtitle", "text": "Собираем цепь: синие линии — цепь амперметров, зелёные — вольтметр"},
+  {"time": 6.0, "action": "draw_wires", "color": "blue", "duration": 2.5},
+  {"time": 8.5, "action": "draw_wires", "color": "green", "duration": 1.5},
+
+  {"time": 10.0, "action": "subtitle", "text": "Устанавливаем R₂ = 200 Ом. Снимаем показания:"},
+  {"time": 10.0, "action": "set_r2", "value": 200},
+  {"time": 10.5, "action": "show_readings"},
+  {"time": 11.5, "action": "show_formula", "text": "Iобщ = I₁ + I₂ = 120 + 60 = 180 мА"},
+  {"time": 12.8, "action": "show_formula", "text": "обратно пропорционально: R₂ = 2·R₁ → I₂ = I₁ / 2"},
+
+  {"time": 14.0, "action": "subtitle", "text": "Применяем закон Ома для участка цепи"},
+  {"time": 14.0, "action": "show_formula", "text": "Rэкв = U / Iобщ = 12 / 0,18 = 66,7 Ом"},
+  {"time": 16.0, "action": "show_formula", "text": "Эквивалентное сопротивление меньше наименьшего (100 Ом)"},
+
+  {"time": 18.0, "action": "subtitle", "text": "Изменяем R₂ от 200 до 0 Ом — наблюдаем за показаниями"},
+  {"time": 18.0, "action": "start_interactive"},
+  {"time": 30.0, "action": "subtitle", "text": "Демонстрация завершена"},
+  {"time": 30.0, "action": "stop_interactive"}
+]

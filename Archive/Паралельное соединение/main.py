@@ -1,0 +1,1045 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Параллельное соединение резисторов — обучающий мультфильм
+Tkinter, стиль — инженерная доска с фото компонентов
+"""
+
+import sys
+import tkinter as tk
+import time
+import threading
+import os
+import queue
+import math
+import pythoncom
+import win32com.client
+
+from PIL import Image, ImageTk
+
+
+def resource_path(rel):
+    try:
+        base = sys._MEIPASS
+    except Exception:
+        base = os.path.dirname(__file__)
+    return os.path.join(base, rel)
+
+
+class TTSManager:
+    def __init__(self):
+        self._queue = queue.Queue()
+        self._voice = None
+        self._start_worker()
+
+    def _start_worker(self):
+        def _worker():
+            pythoncom.CoInitialize()
+            try:
+                v = win32com.client.Dispatch("SAPI.SpVoice")
+                v.Rate = 3
+                v.Volume = 100
+                self._voice = v
+                while True:
+                    item = self._queue.get()
+                    if item is None:
+                        v = None
+                        self._voice = None
+                        break
+                    text, callback = item
+                    try:
+                        v.Speak(text, 0)
+                    except Exception:
+                        pass
+                    if callback:
+                        callback()
+            finally:
+                pythoncom.CoUninitialize()
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+    def speak(self, text, callback=None):
+        self._queue.put((text, callback))
+
+    def estimate_ms(self, text):
+        words = len(text.split())
+        return max(2000, words * 500)
+
+    def pause(self):
+        if self._voice:
+            try:
+                self._voice.Pause()
+            except Exception:
+                pass
+
+    def resume(self):
+        if self._voice:
+            try:
+                self._voice.Resume()
+            except Exception:
+                pass
+
+    def stop(self):
+        self.resume()
+        self._queue.queue.clear()
+
+
+TIMINGS = {
+    "step1_show_resistors": 3000,
+    "step2_show_meters":    3000,
+    "step3_show_battery":   2000,
+    "step4_build_wires":    5000,
+    "step5_initial_values": 5000,
+    "step6_property1":      5000,
+    "step6_property2":      5000,
+    "step6_property3":      5000,
+    "step7_r2_150":         4000,
+    "step7_r2_100":         4000,
+    "step7_r2_50":          4000,
+    "step7_r2_25":          4000,
+    "step7_r2_0":           5000,
+    "step8_finish":         6000,
+}
+
+NARRATION = [
+    "Свойства параллельного соединения можно продемонстрировать с помощью несложного опыта. Для его проведения нам понадобятся два резистора: первый резистор с сопротивлением 100 Ом, второй резистор с переменным сопротивлением.",
+    "Также для определения силы тока будут использоваться электроизмерительные приборы: три миллиамперметра и один вольтметр.",
+    "Для получения экспериментальных данных будем использовать источник постоянного напряжения 12 Вольт.",
+    "Собираем электрическую цепь с параллельным соединением резисторов. Следует помнить, что амперметры включаются последовательно с элементами, ток через которые требуется измерить, а вольтметр включается параллельно.",
+    "Первоначально установим сопротивление переменного резистора R2 равным 200 Ом. При этом первый амперметр будет показывать силу тока 120 миллиампер, второй амперметр показывает силу тока 60 миллиампер, третий амперметр показывает 180 миллиампер, вольтметр показывает 12 Вольт.",
+    "Первое свойство параллельного соединения: общий ток равен сумме токов в ветвях, то есть 120 плюс 60 равно 180 миллиампер.",
+    "Второе свойство: токи распределяются по ветвям обратно пропорционально их сопротивлениям. Сопротивление второго резистора в 2 раза больше сопротивления первого, поэтому ток через него в два раза меньше.",
+    "По показаниям приборов, используя закон Ома, можно рассчитать эквивалентное сопротивление цепи. Оно равно 66,7 Ом, что меньше наименьшего сопротивления 100 Ом.",
+    "При уменьшении сопротивления переменного резистора R2 до 150 Ом ток I2 увеличивается до 80 миллиампер, общий ток — до 200 миллиампер.",
+    "R2 равно 100 Ом. I2 равен 120 миллиампер, общий ток — 240 миллиампер.",
+    "R2 равно 50 Ом. Ток I2 значительно возрос до 240 миллиампер, общий ток — 360 миллиампер.",
+    "R2 равно 25 Ом. Почти короткое замыкание: ток I2 равен 480 миллиампер, общий ток — 600 миллиампер.",
+    "R2 равно 0 Ом. Короткое замыкание! Ток I2 стремится к бесконечности.",
+    "Повторим свойства параллельного соединения: напряжение на всех участках одинаково, общий ток равен сумме токов в ветвях, эквивалентное сопротивление меньше наименьшего сопротивления.",
+]
+
+C_BG          = "#f5f0e8"
+C_RESISTOR    = "#D32F2F"
+C_RESISTOR_BG = "#FFCDD2"
+C_WIRE_SERIES = "#1565C0"
+C_WIRE_BRANCH = "#2E7D32"
+C_METER_BG    = "#E0E0E0"
+C_METER_BORDER= "#424242"
+C_BATTERY     = "#E65100"
+C_TEXT        = "#212121"
+C_PANEL_BG    = "#FFFFFF"
+C_PANEL_BORDER= "#BDBDBD"
+C_R2_ARROW    = "#E65100"
+C_TABLE_HEADER= "#37474F"
+C_SPEECH_BG   = "#FFFFFF"
+C_SPEECH_BORDER = "#FFB300"
+
+_REF_SCALE = 4/3
+
+DX, DY = 60, -150
+
+E1_X = 150; E1_Y1 = 420; E1_Y2 = 620
+
+PA3_X = 300; PA3_Y = 368
+NODE_A_X = 420; NODE_A_Y = 368
+NODE_B_X = 900; NODE_B_Y = 368
+
+PA1_X = 450; PA1_Y = 210
+R1_L = 570; R1_R = 730; R1_Y = 210
+
+PA2_X = 450; PA2_Y = 526
+R2_L = 570; R2_R = 730; R2_Y = 526
+
+PV1_X = 660; PV1_Y = 368
+
+PANEL_X1 = 1220; PANEL_X2 = 1600
+PANEL_Y1 = 75;   PANEL_Y2 = 990
+
+SW = []
+def w(x1,y1,x2,y2): SW.append((x1+DX,y1+DY,x2+DX,y2+DY))
+
+w(150,368, 258,368)
+w(258,368, 342,368)
+w(342,368, 420,368)
+w(420,368, 420,210)
+w(420,210, 408,210)
+w(408,210, 492,210)
+w(492,210, 570,210)
+w(730,210, 900,210)
+w(900,210, 900,368)
+w(420,368, 420,526)
+w(420,526, 408,526)
+w(408,526, 492,526)
+w(492,526, 570,526)
+w(730,526, 900,526)
+w(900,526, 900,368)
+w(900,368, 1150,368)
+w(1150,368, 1150,750)
+w(1150,750, 150,750)
+w(150,750, 150,620)
+
+BW = []
+def g(x1,y1,x2,y2): BW.append((x1+DX,y1+DY,x2+DX,y2+DY))
+
+g(420,368, 638,368)
+g(683,368, 900,368)
+
+JUNCTION_DOTS = [(NODE_A_X+DX,NODE_A_Y+DY), (NODE_B_X+DX,NODE_B_Y+DY)]
+
+ALL_WIRE_STEPS = SW + BW
+
+MEDIA_DIR = resource_path("media")
+PHOTOS_DIR = os.path.join(MEDIA_DIR, "photos")
+CUBE_IMG_PATH = os.path.join(MEDIA_DIR, "kubik.png")
+
+
+class ResistorCartoon:
+    def __init__(self, root):
+        self.root = root
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        self._scale = min(sw / 1600.0, (sh - 40) / 1110.0)
+        self.root.title("Параллельное соединение резисторов - обучающий мультфильм")
+        self.root.state("zoomed")
+        self.root.resizable(False, False)
+
+        self.paused      = False
+        self.stopped     = True
+        self.phase_idx   = 0
+        self.phase_timer = None
+        self.wire_timer  = None
+        self.phase_start = 0.0
+        self.phase_remaining = 0
+        self.wire_substep = 0
+        self.wire_in_progress = False
+        self.wires_visible = 0
+        self.active_phases = set()
+
+        self.phase_items = {}
+        self.wire_items  = []
+        self.formula_items = []
+        self.f7_row_items = []
+        self.photo_items = []
+        self.cube_items = []
+        self.speech_items = []
+
+        self.tts = TTSManager()
+
+        self._cube_anim_dir = 1
+        self._cube_anim_count = 0
+        self._cube_anim_items = []
+
+
+
+        self.setup_ui()
+        self.load_images()
+        self.create_circuit()
+        self.create_component_photos()
+        self.create_cube_character()
+        s = self._scale
+        self.canvas.scale("all", 0, 0, s, s)
+        if hasattr(self, 'speech_text'):
+            self.canvas.itemconfig(self.speech_text, width=max(1, int(640 * s)))
+        self.canvas.config(width=int(1600 * s), height=int(990 * s))
+        self.hide_all()
+
+    def setup_ui(self):
+        self.main_frame = tk.Frame(self.root, bg=C_BG)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        self.canvas = tk.Canvas(
+            self.main_frame, bg=C_BG, width=1600, height=990,
+            highlightthickness=0
+        )
+        self.canvas.pack(side=tk.RIGHT, expand=True, fill=tk.Y)
+
+        self.ctrl = tk.Frame(self.root, bg="#37474F", height=max(1, int(120 * self._scale)))
+        self.ctrl.pack(side=tk.BOTTOM, fill=tk.X)
+        self.ctrl.pack_propagate(False)
+
+        btnf = tk.Frame(self.ctrl, bg="#37474F")
+        btnf.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(8, 2))
+        _bf = ("Arial", max(1, int(16 * self._scale)), "bold")
+        _bf2 = ("Arial", max(1, int(16 * self._scale)))
+        self.btn_play = tk.Button(
+            btnf, text="  \u25b6 СТАРТ  ", font=_bf,
+            command=self.on_play, bg="#43A047", fg="white",
+            bd=0, padx=18, pady=4, cursor="hand2"
+        )
+        self.btn_play.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_pause = tk.Button(
+            btnf, text="  \u23f8 ПАУЗА  ", font=_bf2,
+            command=self.on_pause, bg="#FB8C00", fg="white",
+            bd=0, padx=18, pady=4, cursor="hand2", state="disabled"
+        )
+        self.btn_pause.pack(side=tk.LEFT, padx=6)
+        self.btn_reset = tk.Button(
+            btnf, text="  \u21ba СБРОС  ", font=_bf2,
+            command=self.on_reset, bg="#E53935", fg="white",
+            bd=0, padx=18, pady=4, cursor="hand2", state="disabled"
+        )
+        self.btn_reset.pack(side=tk.LEFT, padx=6)
+
+        infof = tk.Frame(self.ctrl, bg="#37474F")
+        infof.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(2, 8))
+        self.prog = tk.Canvas(infof, height=max(1, int(14 * self._scale)), bg="#546E7A", highlightthickness=0)
+        self.prog.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 12))
+        self.step_label = tk.Label(
+            infof, text="", font=("Consolas", max(1, int(12 * self._scale))),
+            bg="#37474F", fg="#B0BEC5", width=20, anchor="w"
+        )
+        self.step_label.pack(side=tk.LEFT, padx=(0, 12))
+        self.timer_label = tk.Label(
+            infof, text="", font=("Consolas", max(1, int(14 * self._scale)), "bold"),
+            bg="#37474F", fg="#FFF", width=8, anchor="e"
+        )
+        self.timer_label.pack(side=tk.RIGHT, padx=(0, 4))
+        self.status_label = tk.Label(
+            self.ctrl,
+            text="Нажмите «СТАРТ» для начала",
+            font=("Arial", max(1, int(13 * self._scale))), bg="#37474F", fg="#ECEFF1", anchor="w"
+        )
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 4))
+        self.prog_bg = self.prog.create_rectangle(0,0,2000,20, fill="#546E7A", outline="")
+        self.prog_fill = self.prog.create_rectangle(0,0,0,20, fill="#66BB6A", outline="")
+
+    def load_images(self):
+        try:
+            pil = Image.open(CUBE_IMG_PATH).convert("RGBA")
+            cs = max(1, round(502 * self._scale / _REF_SCALE))
+            self.cube_img = ImageTk.PhotoImage(pil.resize((cs, cs), Image.LANCZOS))
+        except Exception:
+            self.cube_img = None
+        self.photo_imgs = {}
+        sizes = {"resistor":(130, 90), "battery":(150, 240), "voltmeter":(110, 110), "ammeter":(110, 110)}
+        rotate_names = {"battery": -90}
+        for name in ["resistor","battery","voltmeter","ammeter"]:
+            p = os.path.join(PHOTOS_DIR, name + ".png")
+            try:
+                pil = Image.open(p).convert("RGBA")
+                pil = pil.resize(sizes[name], Image.LANCZOS)
+                if name in rotate_names:
+                    pil = pil.rotate(rotate_names[name], expand=True, fillcolor=(0,0,0,0))
+                self.photo_imgs[name] = ImageTk.PhotoImage(pil)
+            except Exception:
+                try:
+                    img = tk.PhotoImage(file=p)
+                    self.photo_imgs[name] = img
+                except Exception:
+                    self.photo_imgs[name] = None
+
+    def draw_resistor(self, x1, y, x2, label, tag, r2_mode=False):
+        h = 28
+        items = []
+        items.append(self.canvas.create_line(x1, y, x1-15, y, fill=C_WIRE_SERIES, width=3, tags=tag))
+        items.append(self.canvas.create_line(x2, y, x2+15, y, fill=C_WIRE_SERIES, width=3, tags=tag))
+        items.append(self.canvas.create_rectangle(
+            x1, y-h, x2, y+h, fill=C_RESISTOR_BG, outline=C_RESISTOR, width=2, tags=tag
+        ))
+        wdt = x2 - x1
+        pts = [x1, y]
+        for i in range(1, 10, 2):
+            pts.extend([x1 + i*wdt/10,   y - h + 5])
+            pts.extend([x1 + (i+1)*wdt/10, y + h - 5])
+        pts.extend([x2, y])
+        items.append(self.canvas.create_line(*pts, fill=C_RESISTOR, width=2, tags=tag))
+        items.append(self.canvas.create_text(
+            (x1+x2)//2, y+h+18, text=label,
+            font=("Arial", self._sf(16), "bold"), fill=C_TEXT, anchor="n", tags=tag
+        ))
+        if r2_mode:
+            items.append(self.canvas.create_text(
+                x2+22, y, text="\u21c5", font=("Arial", self._sf(20), "bold"),
+                fill=C_R2_ARROW, anchor="center", tags=tag
+            ))
+            val = self.canvas.create_text(
+                (x1+x2)//2, y-h-18, text="R2 = 200 \u03a9",
+                font=("Arial", self._sf(16), "bold"), fill=C_TEXT, anchor="s", tags=tag
+            )
+            items.append(val)
+            self.r2_label = val
+        return items
+
+    def draw_meter(self, cx, cy, kind, label, tag):
+        r = 18
+        items = []
+        items.append(self.canvas.create_oval(
+            cx-r, cy-r, cx+r, cy+r,
+            fill=C_METER_BG, outline=C_METER_BORDER, width=2, tags=tag
+        ))
+        items.append(self.canvas.create_text(
+            cx, cy, text=kind, font=("Arial", self._sf(16), "bold"),
+            fill=C_TEXT, anchor="center", tags=tag
+        ))
+        items.append(self.canvas.create_text(
+            cx, cy+r+14, text=label,
+            font=("Arial", self._sf(11), "bold"), fill=C_TEXT, anchor="n", tags=tag
+        ))
+        val = self.canvas.create_text(
+            cx, cy+r+32, text="",
+            font=("Consolas", self._sf(11)), fill="#D32F2F", anchor="n", tags=tag
+        )
+        items.append(val)
+        return items, val
+
+    def draw_battery(self, x, y1, y2, label, tag):
+        items = []
+        items.append(self.canvas.create_line(x-22, y1, x+22, y1, fill=C_BATTERY, width=2, tags=tag))
+        items.append(self.canvas.create_line(x-16, y2, x+16, y2, fill=C_BATTERY, width=5, tags=tag))
+        items.append(self.canvas.create_rectangle(
+            x-10, y1+4, x+10, y2-4,
+            fill="#FFF3E0", outline=C_BATTERY, width=2, tags=tag
+        ))
+        items.append(self.canvas.create_text(
+            x+24, y1+4, text="+", font=("Arial", self._sf(16), "bold"),
+            fill=C_BATTERY, anchor="w", tags=tag
+        ))
+        items.append(self.canvas.create_text(
+            x+24, y2-4, text="\u2212", font=("Arial", self._sf(16), "bold"),
+            fill=C_BATTERY, anchor="w", tags=tag
+        ))
+        items.append(self.canvas.create_text(
+            x-50, (y1+y2)//2, text=label,
+            font=("Arial", self._sf(14), "bold"), fill=C_TEXT,
+            anchor="center", angle=90, tags=tag
+        ))
+        return items
+
+    def junction_dot(self, x, y, tag):
+        return self.canvas.create_oval(x-4, y-4, x+4, y+4, fill=C_TEXT, outline="", tags=tag)
+
+    def create_circuit(self):
+        p = {}
+        p["step1"] = []
+        p["step1"].extend(self.draw_resistor(R1_L+DX, R1_Y+DY, R1_R+DX, "R1 = 100 \u03a9", "r1"))
+        p["step1"].extend(self.draw_resistor(R2_L+DX, R2_Y+DY, R2_R+DX, "R2 = 0\u2026200 \u03a9", "r2", r2_mode=True))
+
+        p["step2"] = []
+        items, self.pa1_val = self.draw_meter(PA1_X+DX, PA1_Y+DY, "A", "PA1", "meter")
+        p["step2"].extend(items)
+        items, self.pa2_val = self.draw_meter(PA2_X+DX, PA2_Y+DY, "A", "PA2", "meter")
+        p["step2"].extend(items)
+        items, self.pa3_val = self.draw_meter(PA3_X+DX, PA3_Y+DY, "A", "PA3", "meter")
+        p["step2"].extend(items)
+        items, self.pv1_val = self.draw_meter(PV1_X+DX, PV1_Y+DY, "V", "PV1", "meter")
+        p["step2"].extend(items)
+
+        p["step3"] = []
+        bx, by1, by2 = E1_X+DX, E1_Y1+DY, E1_Y2+DY
+        p["step3"].append(self.canvas.create_text(
+            bx, by1 - 30, text="E1 = 12 \u0412",
+            font=("Arial", self._sf(16), "bold"), fill=C_BATTERY, anchor="center", tags="e1"
+        ))
+        p["step3"].append(self.canvas.create_line(bx, 368+DY, bx, by1 + 70, fill=C_WIRE_SERIES, width=3, tags="e1_wire"))
+        p["step3"].append(self.canvas.create_line(bx, by2 - 70, bx, 750+DY, fill=C_WIRE_SERIES, width=3, tags="e1_wire"))
+
+        p["step4"] = []
+        for jx, jy in JUNCTION_DOTS:
+            p["step4"].append(self.junction_dot(jx, jy, "junc"))
+
+        self.wire_items = []
+        for i, (x1,y1,x2,y2) in enumerate(ALL_WIRE_STEPS):
+            is_br = i >= len(SW)
+            col = C_WIRE_BRANCH if is_br else C_WIRE_SERIES
+            item = self.canvas.create_line(x1, y1, x2, y2, fill=col, width=3, tags="w%d" % i)
+            self.wire_items.append(item)
+
+        p["step5"] = []
+        self.phase_items = p
+        self.create_formula_panel()
+        for item in self.wire_items:
+            self.canvas.lower(item)
+
+    def create_formula_panel(self):
+        px = PANEL_X1 + 20
+        fi = []
+        fi.append(self.canvas.create_rectangle(
+            PANEL_X1, PANEL_Y1, PANEL_X2, PANEL_Y2,
+            fill=C_PANEL_BG, outline=C_PANEL_BORDER, width=2, tags="f_all"
+        ))
+        fi.append(self.canvas.create_text(
+            (PANEL_X1+PANEL_X2)//2, PANEL_Y1+25,
+            text="Свойства цепи",
+            font=("Arial", self._sf(18), "bold"), fill=C_TABLE_HEADER,
+            anchor="center", tags="f_all"
+        ))
+        self.f_panel_bg_items = fi
+        self.formula_items.extend(fi)
+
+        self.f5_items = []
+        ty = PANEL_Y1 + 65
+        self.f5_items.append(self.canvas.create_text(
+            px, ty,
+            text="{:20}{:>10}".format("Параметр", "Значение"),
+            font=("Consolas", self._sf(12), "bold"), fill=C_TABLE_HEADER,
+            anchor="w", tags="f_step5"
+        ))
+        for i, (param, val) in enumerate([
+            ("R1", "100 Ом"), ("R2", "200 Ом"),
+            ("I1", "120 мА"), ("I2", "60 мА"),
+            ("Iобщ", "180 мА"), ("U", "12 В"),
+        ]):
+            y = ty + 28 + i*26
+            self.f5_items.append(self.canvas.create_text(
+                px, y, text="{:20}{:>10}".format(param, val),
+                font=("Consolas", self._sf(12)), fill=C_TEXT,
+                anchor="w", tags="f_step5"
+            ))
+        self.formula_items.extend(self.f5_items)
+
+        self.f6_groups = []
+        for lines in [
+            ["Iобщ = I₁ + I₂", "180 мА = 120 мА + 60 мА",
+             "Общий ток равен сумме",
+             "токов в ветвях."],
+            ["R₂ / R₁ = I₁ / I₂", "200 / 100 = 120 / 60 = 2",
+             "Токи обратно",
+             "пропорциональны",
+             "сопротивлениям."],
+        ]:
+            grp = []
+            y0 = PANEL_Y1 + 65
+            for li, line in enumerate(lines):
+                is_title = li < 2
+                fs = self._sf(14 if is_title else 11)
+                fw = "bold" if is_title else "normal"
+                fc = "#D32F2F" if is_title else C_TEXT
+                y = y0 + li*30 + len(self.f6_groups)*190
+                grp.append(self.canvas.create_text(
+                    px, y, text=line,
+                    font=("Arial", fs, fw), fill=fc,
+                    anchor="w", tags="f_step6"
+                ))
+            self.f6_groups.append(grp)
+            for item in grp:
+                self.formula_items.append(item)
+
+        self.f7_header = self.canvas.create_text(
+            px, PANEL_Y1+65,
+            text="{:>6} {:>8} {:>8} {:>6}".format("R2","I2","Iобщ","U"),
+            font=("Consolas", self._sf(11), "bold"), fill=C_TABLE_HEADER,
+            anchor="w", tags="f_step7"
+        )
+        self.formula_items.append(self.f7_header)
+        self.f7_row_items = []
+        for ri, (r2, i2, i3, u) in enumerate([
+            (200, 60, 180, 12), (150, 80, 200, 12),
+            (100, 120, 240, 12), (50, 240, 360, 12),
+            (25, 480, 600, 12), (0, "∞", "∞", 12),
+        ]):
+            y = PANEL_Y1 + 65 + 24 + ri*22
+            i2s = "{:>6}".format(i2) if isinstance(i2, int) else "{:>6}".format(i2)
+            i3s = "{:>6}мА".format(i3) if isinstance(i3, int) else "{:>6}".format(i3)
+            txt = "{:>6} {:>6} {:>9} {:>4}В".format(r2, i2s, i3s, u)
+            t = self.canvas.create_text(
+                px, y, text=txt,
+                font=("Consolas", self._sf(11)), fill=C_TEXT,
+                anchor="w", tags="f_step7"
+            )
+            self.f7_row_items.append(t)
+            self.formula_items.append(t)
+
+        self.f8_items = []
+        for li, line in enumerate([
+            "Свойства параллельного",
+            "соединения:", "",
+            "1.  U = const = 12 В",
+            "    (напряжение одинаково)", "",
+            "2.  Iобщ = I₁ + I₂",
+            "    (ток ветви не зависит",
+            "    от другой ветви)", "",
+            "3.  Rэкв < R₁, Rэкв < R₂",
+            "    (эквивалентное",
+            "    сопротивление",
+            "    меньше наименьшего)", "",
+            "4.  I₁ / I₂ = R₂ / R₁",
+            "    (токи обратно пропорц.",
+            "    сопротивлениям)",
+        ]):
+            is_numbered = line and line[0].isdigit()
+            fs = self._sf(15 if is_numbered else 11)
+            fw = "bold" if is_numbered else "normal"
+            fc = "#D32F2F" if "=" in line else C_TEXT
+            y = PANEL_Y1 + 65 + li*24
+            self.f8_items.append(self.canvas.create_text(
+                px, y, text=line,
+                font=("Arial", fs, fw), fill=fc,
+                anchor="w", tags="f_step8"
+            ))
+        self.formula_items.extend(self.f8_items)
+
+    def create_component_photos(self):
+        # Battery photo (placed left of battery symbol)
+        img = self.photo_imgs.get("battery")
+        if img:
+            bx = E1_X + DX - 130
+            by = (E1_Y1 + DY + E1_Y2 + DY) // 2
+            cid = self.canvas.create_image(bx, by, image=img, anchor="center", tags="comp_photo")
+            self.photo_items.append(cid)
+
+    def create_cube_character(self):
+        cx, cy = 210, 820
+        if self.cube_img:
+            self.cube_img_id = self.canvas.create_image(
+                cx, cy, image=self.cube_img, anchor="center", tags="cube"
+            )
+            self.cube_items.append(self.cube_img_id)
+        else:
+            self.cube_img_id = self.canvas.create_oval(
+                cx-60, cy-60, cx+60, cy+60,
+                fill="#FFE082", outline="#FF8F00", width=2, tags="cube"
+            )
+            self.cube_items.append(self.cube_img_id)
+            self.cube_items.append(self.canvas.create_text(
+                cx, cy, text="?", font=("Arial", self._sf(40), "bold"),
+                fill="#E65100", anchor="center", tags="cube"
+            ))
+
+        bubble_x1 = cx + 140
+        bubble_y1 = 620
+        bubble_x2 = cx + 850
+        bubble_y2 = 710
+        self.speech_bg = self.canvas.create_rectangle(
+            bubble_x1, bubble_y1, bubble_x2, bubble_y2,
+            fill=C_SPEECH_BG, outline=C_SPEECH_BORDER, width=2,
+            tags="speech"
+        )
+        self.speech_items.append(self.speech_bg)
+        self.speech_tri = self.canvas.create_polygon(
+            cx + 80, bubble_y2 + 6,
+            bubble_x1 - 2, bubble_y2 - 8,
+            bubble_x1 - 2, bubble_y2 + 8,
+            fill=C_SPEECH_BG, outline=C_SPEECH_BORDER, width=2,
+            tags="speech"
+        )
+        self.speech_items.append(self.speech_tri)
+        self.speech_text = self.canvas.create_text(
+            (bubble_x1+bubble_x2)//2, (bubble_y1+bubble_y2)//2,
+            text="", font=("Arial", self._sf(16)), fill=C_TEXT,
+            anchor="center", width=int((bubble_x2 - bubble_x1) * 0.9), tags="speech"
+        )
+        self.speech_items.append(self.speech_text)
+
+    def hide_all(self):
+        for lst in self.phase_items.values():
+            for item in lst:
+                self.canvas.itemconfig(item, state="hidden")
+        for item in self.wire_items:
+            self.canvas.itemconfig(item, state="hidden")
+        for item in self.formula_items:
+            self.canvas.itemconfig(item, state="hidden")
+        for item in self.photo_items:
+            self.canvas.itemconfig(item, state="hidden")
+        for item in self.cube_items:
+            self.canvas.itemconfig(item, state="hidden")
+        for item in self.speech_items:
+            self.canvas.itemconfig(item, state="hidden")
+        self.wires_visible = 0
+        self.active_phases.clear()
+
+    def show_photo_panel(self, visible=True):
+        state = "normal" if visible else "hidden"
+        for item in self.photo_items:
+            self.canvas.itemconfig(item, state=state)
+
+    def show_cube(self, visible=True):
+        state = "normal" if visible else "hidden"
+        for item in self.cube_items:
+            self.canvas.itemconfig(item, state=state)
+        if visible:
+            pass
+        else:
+            self._cube_anim_items = []
+
+    def _start_cube_anim(self):
+        self._cube_anim_dir = 1
+        self._cube_anim_count = 0
+        self._cube_anim_items = list(self.cube_items) + list(self.speech_items)
+        self.root.after(50, self._cube_bounce)
+
+    def _cube_bounce(self):
+        if not self._cube_anim_items:
+            return
+        try:
+            state = self.canvas.itemcget(self._cube_anim_items[0], "state")
+        except Exception:
+            return
+        if state == "hidden" or self.stopped:
+            return
+        offset = self._cube_anim_dir * 1
+        for item in self._cube_anim_items:
+            try:
+                self.canvas.move(item, 0, offset)
+            except Exception:
+                pass
+        self._cube_anim_count += 1
+        if self._cube_anim_count >= 8:
+            self._cube_anim_dir *= -1
+            self._cube_anim_count = 0
+        self.root.after(50, self._cube_bounce)
+
+    def show_speech(self, text):
+        state = "normal"
+        for item in self.speech_items:
+            self.canvas.itemconfig(item, state=state)
+        if hasattr(self, 'speech_text'):
+            self.canvas.itemconfig(self.speech_text, text=text)
+
+    def hide_speech(self):
+        for item in self.speech_items:
+            self.canvas.itemconfig(item, state="hidden")
+
+    def refresh_display(self):
+        for lst in self.phase_items.values():
+            for item in lst:
+                self.canvas.itemconfig(item, state="hidden")
+        for key in self.active_phases:
+            if key in self.phase_items:
+                for item in self.phase_items[key]:
+                    self.canvas.itemconfig(item, state="normal")
+        for i, item in enumerate(self.wire_items):
+            state = "normal" if i < self.wires_visible else "hidden"
+            self.canvas.itemconfig(item, state=state)
+        if self.phase_idx > 0 or self.active_phases:
+            self.show_photo_panel(True)
+        self.show_cube(True)
+
+    def show_formula(self, key):
+        for item in self.formula_items:
+            self.canvas.itemconfig(item, state="hidden")
+        for item in self.f_panel_bg_items:
+            self.canvas.itemconfig(item, state="normal")
+        if key == "step5":
+            for item in self.f5_items:
+                self.canvas.itemconfig(item, state="normal")
+        elif key == "step6_p1":
+            for item in self.f6_groups[0]:
+                self.canvas.itemconfig(item, state="normal")
+        elif key == "step6_p2":
+            for item in self.f6_groups[1]:
+                self.canvas.itemconfig(item, state="normal")
+        elif key == "step7":
+            self.canvas.itemconfig(self.f7_header, state="normal")
+            for item in self.f7_row_items:
+                self.canvas.itemconfig(item, state="normal")
+        elif key == "step8":
+            for item in self.f8_items:
+                self.canvas.itemconfig(item, state="normal")
+
+    def calc_values(self, r2):
+        i1 = 0.12
+        u = 12.0
+        if r2 <= 0:
+            return i1, float("inf"), float("inf"), u
+        i2 = u / r2
+        i3 = i1 + i2
+        return i1, i2, i3, u
+
+    def update_readings(self, r2):
+        i1, i2, i3, u = self.calc_values(r2)
+
+        def fmt(v):
+            if math.isinf(v):
+                return "\u221e"
+            v_ma = v * 1000.0
+            if abs(v_ma - round(v_ma)) < 0.05:
+                return "%d" % v_ma
+            return "%.1f" % v_ma
+
+        self.canvas.itemconfig(self.pa1_val, text="%d \u043c\u0410" % (i1*1000))
+        if math.isinf(i2):
+            self.canvas.itemconfig(self.pa2_val, text="\u221e \u043c\u0410")
+            self.canvas.itemconfig(self.pa3_val, text="\u221e \u043c\u0410")
+        else:
+            self.canvas.itemconfig(self.pa2_val, text="%s \u043c\u0410" % fmt(i2))
+            self.canvas.itemconfig(self.pa3_val, text="%s \u043c\u0410" % fmt(i3))
+        self.canvas.itemconfig(self.pv1_val, text="%d \u0412" % u)
+        if hasattr(self, "r2_label"):
+            self.canvas.itemconfig(self.r2_label, text="R2 = %d \u03a9" % r2 if r2 > 0 else "R2 = 0 \u03a9 (\u043a\u0437)")
+
+    PHASES = [
+        ("step1","\u0428\u0430\u0433 1 \u0438\u0437 8","\u041f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u0435 \u0440\u0435\u0437\u0438\u0441\u0442\u043e\u0440\u043e\u0432 R1 = 100 \u041e\u043c \u0438 R2 = 0\u2026200 \u041e\u043c"),
+        ("step2","\u0428\u0430\u0433 2 \u0438\u0437 8","\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0438\u0437\u043c\u0435\u0440\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u0438\u0431\u043e\u0440\u043e\u0432 PA1\u2013PA3, PV1"),
+        ("step3","\u0428\u0430\u0433 3 \u0438\u0437 8","\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0430 E1 = 12 \u0412"),
+        ("step4","\u0428\u0430\u0433 4 \u0438\u0437 8","\u0421\u0431\u043e\u0440\u043a\u0430 \u0446\u0435\u043f\u0438: \u043f\u0430\u0440\u0430\u043b\u043b\u0435\u043b\u044c\u043d\u043e\u0435 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u0435"),
+        ("step5","\u0428\u0430\u0433 5 \u0438\u0437 8","\u041f\u043e\u043a\u0430\u0437\u0430\u043d\u0438\u044f \u043f\u0440\u0438\u0431\u043e\u0440\u043e\u0432 \u043f\u0440\u0438 R2 = 200 \u041e\u043c"),
+        ("step6_p1","\u0428\u0430\u0433 6 \u0438\u0437 8","\u0421\u0432\u043e\u0439\u0441\u0442\u0432\u043e 1: I\u043e\u0431\u0449 = I\u2081 + I\u2082 (180 = 120 + 60)"),
+        ("step6_p2","\u0428\u0430\u0433 6 \u0438\u0437 8","\u0421\u0432\u043e\u0439\u0441\u0442\u0432\u043e 2: R\u2082/R\u2081 = I\u2081/I\u2082 = 2"),
+        ("step6_p3","\u0428\u0430\u0433 6 \u0438\u0437 8","\u0421\u0432\u043e\u0439\u0441\u0442\u0432\u043e 3: R\u044d\u043a\u0432 = 66,7 \u041e\u043c < 100 \u041e\u043c"),
+        ("step7_r2_150","\u0428\u0430\u0433 7 \u0438\u0437 8","R\u2082 = 150 \u041e\u043c \u2013 \u043f\u043e\u043a\u0430\u0437\u0430\u043d\u0438\u044f \u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f"),
+        ("step7_r2_100","\u0428\u0430\u0433 7 \u0438\u0437 8","R\u2082 = 100 \u041e\u043c \u2013 \u0442\u043e\u043a I\u2082 \u0440\u0430\u0441\u0442\u0451\u0442"),
+        ("step7_r2_50", "\u0428\u0430\u0433 7 \u0438\u0437 8","R\u2082 = 50 \u041e\u043c \u2013 I\u2082 = 240 \u043c\u0410"),
+        ("step7_r2_25", "\u0428\u0430\u0433 7 \u0438\u0437 8","R\u2082 = 25 \u041e\u043c \u2013 \u043f\u043e\u0447\u0442\u0438 \u043a\u0437"),
+        ("step7_r2_0",  "\u0428\u0430\u0433 7 \u0438\u0437 8","R\u2082 = 0 \u041e\u043c \u2013 \u043a\u043e\u0440\u043e\u0442\u043a\u043e\u0435 \u0437\u0430\u043c\u044b\u043a\u0430\u043d\u0438\u0435!"),
+        ("step8",       "\u0428\u0430\u0433 8 \u0438\u0437 8","\u0418\u0442\u043e\u0433: \u0441\u0432\u043e\u0439\u0441\u0442\u0432\u0430 \u043f\u0430\u0440\u0430\u043b\u043b\u0435\u043b\u044c\u043d\u043e\u0433\u043e \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u044f"),
+    ]
+    PHASE_DURATIONS = [TIMINGS[k] for k in (
+        "step1_show_resistors","step2_show_meters","step3_show_battery",
+        "step4_build_wires","step5_initial_values",
+        "step6_property1","step6_property2","step6_property3",
+        "step7_r2_150","step7_r2_100","step7_r2_50","step7_r2_25","step7_r2_0",
+        "step8_finish",
+    )]
+    PHASE_FORMULA = [
+        None,"step5",None,None,"step5",
+        "step6_p1","step6_p2","step6_p3",
+        "step7","step7","step7","step7","step7",
+        "step8",
+    ]
+
+    def enter_phase(self, idx):
+        if idx >= len(self.PHASES):
+            self.show_final()
+            return
+
+        try:
+            self.phase_idx = idx
+            key, step_txt, status = self.PHASES[idx]
+            dur = self.PHASE_DURATIONS[idx]
+        except Exception:
+            return
+
+        self.step_label.config(text=step_txt)
+        self.status_label.config(text=status)
+        self.update_progress(idx)
+
+        if idx < len(NARRATION):
+            self.show_speech(NARRATION[idx])
+            self.tts.speak(NARRATION[idx])
+            tts_dur = self.tts.estimate_ms(NARRATION[idx])
+            effective_dur = max(tts_dur, dur)
+        else:
+            self.show_speech(status)
+            effective_dur = dur
+
+        for i in range(idx + 1):
+            pk = self.PHASES[i][0]
+            if pk in self.phase_items:
+                self.active_phases.add(pk)
+
+        self.refresh_display()
+
+        fkey = self.PHASE_FORMULA[idx]
+        if fkey:
+            self.show_formula(fkey)
+        else:
+            for item in self.formula_items:
+                self.canvas.itemconfig(item, state="hidden")
+            for item in self.f_panel_bg_items:
+                self.canvas.itemconfig(item, state="normal")
+
+        if idx == 0:
+            self.update_readings(200)
+        elif idx == 4:
+            self.update_readings(200)
+        elif idx == 5:  self.highlight_property1()
+        elif idx == 6:  self.highlight_property2()
+        elif idx == 7:  self.highlight_property3()
+        elif 8 <= idx <= 12:
+            r2_vals = [200, 150, 100, 50, 25, 0]
+            sub = idx - 8
+            if sub < len(r2_vals):
+                self.update_readings(r2_vals[sub])
+                self.highlight_r2_table_row(sub)
+
+        if idx not in (5, 6, 7):
+            self.clear_highlights()
+
+        if idx == 3:
+            self.wire_substep = 0
+            self.wire_in_progress = True
+            self.wires_visible = 0
+            self.refresh_display()
+            self.root.after(50, self.advance_wires)
+        else:
+            self.wire_in_progress = False
+
+        self.phase_remaining = effective_dur
+        self.phase_start = time.time()
+        self.schedule_next(effective_dur)
+
+    def schedule_next(self, delay_ms):
+        if self.phase_timer:
+            self.root.after_cancel(self.phase_timer)
+        self.phase_timer = self.root.after(delay_ms, self.on_timeout)
+        self.timer_label.config(text="%ds" % (delay_ms//1000))
+
+    def on_timeout(self):
+        try:
+            self.phase_timer = None
+            if self.wire_in_progress:
+                self.wire_in_progress = False
+                if self.wire_timer:
+                    self.root.after_cancel(self.wire_timer)
+                    self.wire_timer = None
+                self.wires_visible = len(self.wire_items)
+                self.refresh_display()
+            self.enter_phase(self.phase_idx + 1)
+        except Exception:
+            if self.stopped:
+                return
+
+    def advance_wires(self):
+        try:
+            if self.paused:
+                return
+            if self.wire_substep >= len(self.wire_items):
+                self.wire_in_progress = False
+                self.wires_visible = len(self.wire_items)
+                return
+            self.wire_substep += 1
+            self.wires_visible = self.wire_substep
+            self.refresh_display()
+            if self.wire_substep < len(self.wire_items):
+                self.wire_timer = self.root.after(220, self.advance_wires)
+            else:
+                self.wire_in_progress = False
+                self.wires_visible = len(self.wire_items)
+        except Exception:
+            pass
+
+    def _sf(self, size):
+        return max(1, round(size * self._scale / _REF_SCALE))
+
+    def clear_highlights(self):
+        for item in self.canvas.find_withtag("hl"):
+            self.canvas.delete(item)
+
+    def _hl_frame(self, x1, y1, x2, y2, colour):
+        self.canvas.create_rectangle(
+            x1-6, y1-6, x2+6, y2+6,
+            outline=colour, width=3, dash=(6,3), tags="hl"
+        )
+
+    def _hl_text(self, text, colour):
+        self.canvas.create_text(
+            800, 645, text=text,
+            font=("Arial", self._sf(18), "bold"), fill=colour,
+            anchor="center", tags="hl"
+        )
+
+    def highlight_property1(self):
+        self.clear_highlights()
+        for cx,cy in [(PA1_X+DX, PA1_Y+DY), (PA2_X+DX, PA2_Y+DY), (PA3_X+DX, PA3_Y+DY)]:
+            self._hl_frame(cx-22, cy-22, cx+22, cy+22, "#E65100")
+        self._hl_text("I\u043e\u0431\u0449 = I\u2081 + I\u2082 = 120 + 60 = 180 \u043c\u0410", "#D32F2F")
+
+    def highlight_property2(self):
+        self.clear_highlights()
+        self._hl_frame(R1_L+DX-10, R1_Y+DY-22, R1_R+DX+10, R1_Y+DY+22, "#1565C0")
+        self._hl_frame(R2_L+DX-10, R2_Y+DY-22, R2_R+DX+10, R2_Y+DY+22, "#1565C0")
+        self._hl_text("R\u2082/R\u2081 = I\u2081/I\u2082 = 200/100 = 120/60 = 2", "#1565C0")
+
+    def highlight_property3(self):
+        self.clear_highlights()
+        self._hl_frame(R1_L+DX-10, R1_Y+DY-22, R1_R+DX+10, R1_Y+DY+22, "#E65100")
+        self._hl_frame(R2_L+DX-10, R2_Y+DY-22, R2_R+DX+10, R2_Y+DY+22, "#E65100")
+        self._hl_text("R\u044d\u043a\u0432 = 66,7 \u041e\u043c  <  100 \u041e\u043c = R\u2081", "#E65100")
+
+    def highlight_r2_table_row(self, row_idx):
+        for i, item in enumerate(self.f7_row_items):
+            fc = "#D32F2F" if i == row_idx else C_TEXT
+            fw = "bold" if i == row_idx else "normal"
+            self.canvas.itemconfig(item, fill=fc, font=("Consolas", self._sf(10), fw))
+
+    def update_progress(self, idx):
+        total = len(self.PHASES)
+        frac = (idx + 1) / total if idx >= 0 else 0
+        bw = max(self.prog.winfo_width() - 4, 400)
+        fw = int(bw * frac)
+        self.prog.coords(self.prog_fill, 2, 2, 2 + fw, 16)
+
+    def on_play(self):
+        if not self.stopped:
+            return
+        self.stopped = False
+        self.paused = False
+        self.btn_play.config(state="disabled")
+        self.btn_pause.config(state="normal", text="  \u23f8 ПАУЗА  ")
+        self.btn_reset.config(state="normal")
+        self.show_photo_panel(True)
+        self.show_cube(True)
+        self.enter_phase(0)
+
+    def on_pause(self):
+        if self.stopped:
+            return
+        if not self.paused:
+            self.paused = True
+            self.btn_pause.config(text="  \u25b6 ПРОДОЛЖИТЬ  ")
+            self.tts.pause()
+            if self.phase_timer:
+                self.root.after_cancel(self.phase_timer)
+                self.phase_timer = None
+            if self.wire_timer:
+                self.root.after_cancel(self.wire_timer)
+                self.wire_timer = None
+            elapsed = (time.time() - self.phase_start) * 1000
+            self.phase_remaining = max(0, self.phase_remaining - elapsed)
+            self.timer_label.config(text="\u23f8")
+        else:
+            self.paused = False
+            self.btn_pause.config(text="  \u23f8 ПАУЗА  ")
+            self.tts.resume()
+            self.phase_start = time.time()
+            if self.wire_in_progress:
+                self.wire_timer = self.root.after(50, self.advance_wires)
+            self.schedule_next(int(self.phase_remaining))
+
+    def on_reset(self):
+        self.stopped = True
+        self.paused = False
+        self.tts.stop()
+        if self.phase_timer:
+            self.root.after_cancel(self.phase_timer)
+            self.phase_timer = None
+        if self.wire_timer:
+            self.root.after_cancel(self.wire_timer)
+            self.wire_timer = None
+        self.wire_in_progress = False
+        self.clear_highlights()
+        self.hide_all()
+        self.btn_play.config(state="normal")
+        self.btn_pause.config(state="disabled", text="  \u23f8 ПАУЗА  ")
+        self.btn_reset.config(state="disabled")
+        self.step_label.config(text="")
+        self.status_label.config(text="Нажмите «СТАРТ» для начала")
+        self.timer_label.config(text="")
+        self.update_progress(-1)
+        self.hide_speech()
+
+    def show_final(self):
+        self.status_label.config(
+            text="Мультфильм завершён! Нажмите «СБРОС» для повтора."
+        )
+        self.timer_label.config(text="\u2714")
+        self.step_label.config(text="Шаг 8 из 8")
+        self.btn_pause.config(state="disabled")
+        self.show_speech("Мультфильм завершён! Спасибо за внимание.")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ResistorCartoon(root)
+
+    def _on_closing():
+        app.tts.stop()
+        app.stopped = True
+        if app.phase_timer:
+            root.after_cancel(app.phase_timer)
+        if app.wire_timer:
+            root.after_cancel(app.wire_timer)
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", _on_closing)
+
+    try:
+        root.mainloop()
+    except SystemExit:
+        pass
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        try:
+            root.destroy()
+        except Exception:
+            pass
